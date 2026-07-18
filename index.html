@@ -838,8 +838,12 @@ const el=id=>document.getElementById(id);
 const norm=s=>(s||"").replace(/[أإآ]/g,"ا").replace(/ى/g,"ي").replace(/ة/g,"ه").toLowerCase();
 
 /* ربط اسم قسم الجامعة باسم التخصص في جدول الحدود الدنيا */
-const STOPW=new Set(["و","في","من","قسم"]);
-function toks(s){return norm(s).split(/\s+/).filter(w=>w&&!STOPW.has(w));}
+const STOPW=new Set(["و","/","في","من","قسم","هندسه","تقنيات","تقنيه","علوم","علم","كليه","الهندسه","الكليه","الطبي","الطبيه"]);
+function toks(s){
+  return norm(s).split(/\s+/)
+    .map(w=>w.replace(/^و/,"").replace(/^ب(?=ال)/,""))
+    .filter(w=>w&&!STOPW.has(w));
+}
 function minimaPool(br){
   if(br==="bio")return AHLI.bio.concat(AHLI.shared);
   if(br==="app")return AHLI.app.concat(AHLI.shared);
@@ -855,10 +859,10 @@ function matchMinima(dept,pool){
     if(nr===nd)s=3;
     else if(nr.includes(nd)||nd.includes(nr))s=2;
     else{
-      const tr=toks(r[0]);
-      const ov=tr.filter(w=>td.includes(w)).length;
-      s=ov/Math.max(1,Math.min(tr.length,td.length));
-      if(ov<2&&Math.min(tr.length,td.length)>1)s=0;
+      const tr=[...new Set(toks(r[0]))], tdu=[...new Set(td)];
+      const ov=tr.filter(w=>tdu.includes(w)).length;
+      const mn=Math.min(tr.length,tdu.length);
+      s=(mn<2||ov<2)?0:Math.min(1,ov/mn);
     }
     if(s>bs){bs=s;best=r;}
   }
@@ -878,16 +882,34 @@ function render(){
     /* عرض أقسام جامعة أهلية محددة: الحد الأدنى + الأجور */
     thead.innerHTML='<tr><th>القسم</th><th class="num">الحد الأدنى (صباحي)</th><th class="num">الحد الأدنى (مسائي)</th><th class="num">الأجور الصباحية (د.ع)</th><th class="num">الأجور المسائية (د.ع)</th></tr>';
     const u=FEES[+uniA], pool=minimaPool(br);
-    let n=0;
+    const SPORT=/البدنيه|علوم الرياضه/, HUM=/قانون|ادار[هة]|محاسب|اقتصاد|مالي[هة]|مصرفي[هة]|اعلام|لغ[هة]|تربي[هة]|اداب|اسلامي[هة]|سياسي[هة]|سياح|فنون|رياض الاطفال|اثار|نفس|اجتماع/;
+    const accepted=[], mufadala=[], rejected=[];
     u[1].forEach(r=>{
       if(!match(r[0]))return;
-      const mm=matchMinima(r[0],pool); n++;
-      const m=mm&&mm.r, ap=mm&&mm.approx?"≈ ":"";
+      const mm=matchMinima(r[0],pool), nd=norm(r[0]);
+      if(mm){accepted.push([r,mm]);return;}
+      if(SPORT.test(nd)){mufadala.push([r,"تقديم مباشر / مفاضلة"]);return;}
+      if(br==="bio"||br==="app"){mufadala.push([r,"تخضع للمفاضلة"]);return;}
+      if(br==="adabi"&&HUM.test(nd)){mufadala.push([r,"تخضع للمفاضلة"]);return;}
+      rejected.push(r);
+    });
+    accepted.forEach(([r,mm])=>{
+      const m=mm.r, ap=mm.approx?"≈ ":"";
       const tr=document.createElement("tr");
-      tr.innerHTML=`<td>${r[0]}</td><td class="num" title="${m?m[0]:''}">${m?ap+fmt(m[1]):'<span class="stop">مفاضلة / تحقق من الفرع</span>'}</td><td class="num">${m?ap+fmt(m[2]):"—"}</td><td class="num">${r[1]}</td><td class="num">${r[2]==="—"?'<span class="stop">لا توجد مسائية</span>':r[2]}</td>`;
+      tr.innerHTML=`<td>${r[0]}</td><td class="num" title="${m[0]}">${ap+fmt(m[1])}</td><td class="num">${ap+fmt(m[2])}</td><td class="num">${r[1]}</td><td class="num">${r[2]==="—"?'<span class="stop">لا توجد مسائية</span>':r[2]}</td>`;
       tb.appendChild(tr);
     });
-    el("ahliCount").textContent=`${u[0]} — ${n} قسماً (الحد الأدنى وفق فرع «${el("branch").selectedOptions[0].text}»؛ القسم غير المطابق لجداول الحدود يخضع للمفاضلة أو لفرع آخر)`;
+    mufadala.forEach(([r,lbl])=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${r[0]}</td><td class="num" colspan="2"><span class="stop">${lbl}</span></td><td class="num">${r[1]}</td><td class="num">${r[2]==="—"?'<span class="stop">لا توجد مسائية</span>':r[2]}</td>`;
+      tb.appendChild(tr);
+    });
+    if(rejected.length){
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td colspan="5" style="color:var(--muted);font-size:.82rem;padding:12px"><b>أقسام لا تقبل هذا الفرع وفق الدليل (${rejected.length}):</b> ${rejected.map(r=>r[0]).join("، ")}</td>`;
+      tb.appendChild(tr);
+    }
+    el("ahliCount").textContent=`${u[0]} — فرع «${el("branch").selectedOptions[0].text}»: ${accepted.length} قسماً يقبل الفرع${mufadala.length?`، ${mufadala.length} بالمفاضلة`:""}${rejected.length?`، ${rejected.length} لا يقبل`:""}`;
     return;
   }
   thead.innerHTML='<tr><th>التخصص / الدراسة</th><th class="num">الحد الأدنى (صباحي)</th><th class="num">الحد الأدنى (مسائي)</th><th class="num">الأجور</th></tr>';
